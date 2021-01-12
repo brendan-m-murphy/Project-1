@@ -6,6 +6,7 @@ song_table_drop = "DROP TABLE IF EXISTS songs;"
 artist_table_drop = "DROP TABLE IF EXISTS artists;"
 time_table_drop = "DROP TABLE IF EXISTS time;"
 
+
 # CREATE TABLES
 
 songplay_table_create = ("""
@@ -63,37 +64,53 @@ time_table_create = ("""
                          );
                      """)
 
-
 # query to create foreign keys and indices for each fk
-set_fk_idx = ("""
-              ALTER TABLE songplays
-              ADD CONSTRAINT FOREIGN KEY (start_time)
-                  REFERENCES time
-                  ON DELETE RESTRICT ON UPDATE CASCADE
-              ADD CONSTRAINT FOREIGN KEY (user_id)
-                  REFERENCES users
-                  ON DELETE RESTRICT ON UPDATE CASCADE
-              ADD CONSTRAINT FOREIGN KEY (song_id)
-                  REFERENCES songs
-                  ON DELETE RESTRICT ON UPDATE CASCADE
-              ADD CONSTRAINT FOREIGN KEY (artist_id)
-                  REFERENCES artists
-                  ON DELETE RESTRICT ON UPDATE CASCADE
-              ADD INDEX idx_start_time (start_time)
-              ADD INDEX idx_user_id (user_id)
-              ADD INDEX idx_song_id (song_id)
-              ADD INDEX idx_artist_id (artist_id);
-              """)
+set_fk1 = ("""
+ALTER TABLE songplays
+ADD CONSTRAINT fk__songplays__time
+FOREIGN KEY (start_time) 
+REFERENCES time
+ON DELETE RESTRICT ON UPDATE CASCADE;""")
 
 
-# query for foreign key and index in songs
-set_fk_idx2 = ("""
-               ALTER TABLE songs
-               ADD CONSTRAINT FOREIGN KEY (artist_id)
-                   REFERENCES artists
-                   ON DELETE RESTRICT ON UPDATE CASCADE
-               ADD INDEX idx_artist_id (artist_id);
-               """)
+set_fk2 = ("""
+ALTER TABLE songplays
+ADD CONSTRAINT fk__songplays__users
+FOREIGN KEY (user_id)
+REFERENCES users
+ON DELETE RESTRICT ON UPDATE CASCADE;""")
+
+
+set_fk3 = ("""
+ALTER TABLE songplays
+ADD CONSTRAINT fk__songplays__songs
+FOREIGN KEY (song_id)
+REFERENCES songs
+ON DELETE RESTRICT ON UPDATE CASCADE;""")
+
+
+set_fk4 = ("""
+ALTER TABLE songplays
+ADD CONSTRAINT fk__songplays__artists
+FOREIGN KEY (artist_id)
+REFERENCES artists
+ON DELETE RESTRICT ON UPDATE CASCADE;""")
+
+
+set_fk5 = ("""
+ALTER TABLE songs
+ADD CONSTRAINT fk__songs__artists
+FOREIGN KEY (artist_id)
+REFERENCES artists
+ON DELETE RESTRICT ON UPDATE CASCADE;""")
+
+
+set_idx1 = "CREATE INDEX IF NOT EXISTS idx_start_time ON songplays (start_time);"
+set_idx2 = "CREATE INDEX IF NOT EXISTS idx_user_id ON songplays (user_id);"
+set_idx3 = "CREATE INDEX IF NOT EXISTS idx_song_id ON songplays (song_id);"
+set_idx4 = "CREATE INDEX IF NOT EXISTS idx_artist_id ON songplays (artist_id);"
+set_idx5 = "CREATE INDEX IF NOT EXISTS idx_artist_id ON songs (artist_id);"
+
 
 
 # INSERT RECORDS
@@ -155,4 +172,4 @@ create_table_queries = [songplay_table_create, user_table_create,
 drop_table_queries = [songplay_table_drop, user_table_drop,
                       song_table_drop, artist_table_drop,
                       time_table_drop]
-constraint_queries = [set_fk_idx, set_fk_idx2]
+constraint_queries = [set_fk1, set_fk2, set_fk3, set_fk4, set_fk5, set_idx1, set_idx2, set_idx3, set_idx4, set_idx5]
