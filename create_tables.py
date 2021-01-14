@@ -78,7 +78,7 @@ def main():
     
     drop_tables(cur, conn)
     create_tables(cur, conn)
-    set_constraints(cur, conn)
+#    set_constraints(cur, conn)
 
     conn.close()
 

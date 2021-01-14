@@ -38,7 +38,7 @@ song_table_create = ("""
                          song_id char(18) PRIMARY KEY,
                          title varchar,
                          artist_id char(18),
-                         year integer,
+                         year smallint,
                          duration numeric(9, 5)
                          );
                      """)
@@ -60,6 +60,7 @@ time_table_create = ("""
                          day smallint,
                          week smallint,
                          month smallint,
+                         year smallint,
                          weekday boolean
                          );
                      """)
@@ -130,7 +131,8 @@ user_table_insert = ("""
                          (user_id,
                           first_name, last_name,
                           gender, level)
-                     VALUES (%s, %s, %s, %s, %s);
+                     VALUES (%s, %s, %s, %s, %s)
+                     ON CONFLICT DO NOTHING;
                      """)
 
 song_table_insert = ("""
@@ -146,7 +148,8 @@ artist_table_insert = ("""
                            (artist_id,
                             name, location,
                             latitude, longitude)
-                       VALUES (%s, %s, %s, %s, %s);
+                       VALUES (%s, %s, %s, %s, %s)
+                       ON CONFLICT DO NOTHING;
                        """)
 
 
@@ -154,14 +157,18 @@ time_table_insert = ("""
                      INSERT INTO time
                          (start_time, hour,
                           day, week,
-                          month, weekday)
-                     VALUES (%s, %s, %s, %s, %s, %s);
+                          month, year, weekday)
+                     VALUES (%s, %s, %s, %s, %s, %s, %s)
+                     ON CONFLICT DO NOTHING;
                      """)
 
 # FIND SONGS
 
 song_select = ("""
-               
+               SELECT s.song_id, a.artist_id
+               FROM songs AS s
+               JOIN artists AS a ON s.artist_id = a.artist_id
+               WHERE s.title = %s AND a.name = %s AND s.duration = %s;
                """)
 
 # QUERY LISTS
