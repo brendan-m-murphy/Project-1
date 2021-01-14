@@ -5,7 +5,7 @@ import psycopg2
 from psycopg2 import Error
 import pandas as pd
 from sql_queries import *
-
+from tqdm import tqdm
 
 
 def process_song_file(cur, filepath):
@@ -96,10 +96,13 @@ def process_data(cur, conn, filepath, func):
     print('{} files found in {}'.format(num_files, filepath))
 
     # iterate over files and process
-    for i, datafile in enumerate(all_files, 1):
+    # add nice error bar
+    progress_bar = tqdm(enumerate(all_files, 1), total=num_files,
+                            unit='files', desc="Processing '{}'".format(filepath))
+    for i, datafile in progress_bar:
         func(cur, datafile)
         conn.commit()
-        print('{}/{} files processed.'.format(i, num_files))
+
 
 
 def main():
