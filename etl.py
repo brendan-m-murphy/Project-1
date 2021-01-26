@@ -1,9 +1,66 @@
+import io
 import os
 import glob
 import psycopg2
 import pandas as pd
 import sql_queries
 from tqdm import tqdm
+
+
+def transform_song_df(df):
+    """
+    Takes a DataFrame created from song .json files and returns
+    DataFrames for loading into artist and song tables.
+
+    Note: it is important that the artist table is loaded first
+    to satisfy foreign key constraints.
+    """
+    artist_cols = ['artist_id', 'artist_name',
+                   'artist_location', 'artist_latitude',
+                   'artist_longitude']
+    song_cols = ['song_id', 'title', 'artist_id', 'year', 'duration']
+
+    return df[artist_cols], df[song_cols]
+
+
+def df_to_csv(df):
+    """
+    Converts DataFrame df to csv.
+    Returns a string.
+    """
+    with io.StringIO() as output:
+        df.to_csv(output, sep='\t', header=False, index=False)
+        output.seek(0)
+        result = output.getvalue()
+
+    return result
+
+
+def df_to_csv2(df):
+    "It seems that .to_csv can write directly to a string, making StringIO unnecessary."
+    return df.to_csv(None, sep='\t', header=False, index=False)
+
+
+def copy_from_df(df, cur, table):
+    """
+    Copy DataFrame `df` to PostgreSQL table 'table' via cursor `cur`.
+
+    The number and type of columns in `df` are expected to match the
+    columns in `table`.
+
+    Parameters
+    ----------
+    df: DataFrame
+
+    cur: psycopg2 cursor
+
+    table: string, name of table in Database connected to cur that we wish
+    to copy to.
+    """
+    with io.StringIO() as f:
+        df.to_csv(f, sep='\t', header=False, index=False)
+        f.seek(0)
+        cur.copy_from(f, table)
 
 
 # columns for artist and song queries
