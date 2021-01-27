@@ -1,6 +1,7 @@
 from unittest import TestCase, main
 from etl import transform_song_df
-from etl import df_to_csv, df_to_csv2, copy_from_df
+from etl import copy_from_df
+from etl import transform_log_df_time,  transform_log_df_user
 import io
 import pandas as pd
 import psycopg2
@@ -46,27 +47,71 @@ class TransformSongDfTestCase(TestCase):
 
 
 def make_log_data():
-    pass
+    log_raw = {"artist": ["Frumpies"],
+               "auth": ["Logged In"],
+               "firstName": ["Anabelle"],
+               "gender": ["F"],
+               "itemInSession": [0],
+               "lastName": ["Simpson"],
+               "length": [134.47791],
+               "level": ["free"],
+               "location": ["Philadelphia-Camden-Wilmington, PA-NJ-DE-MD"],
+               "method": ["PUT"],
+               "page": ["NextSong"],
+               "registration": [1541044398796.0],
+               "sessionId": [455],
+               "song": ["Fuck Kitty"],
+               "status": [200],
+               "ts": [1541903636796],
+               "userAgent": ["Mozilla 5.0 (Macintosh; Intel Mac OS X 10_9_4) AppleWebKit 537.3"],
+               "userId": ["69"]}
+
+    log_users  = {"userId": ["69"],
+                  "firstName": ["Anabelle"],
+                  "lastName": ["Simpson"],
+                  "gender": ["F"],
+                  "level": ["free"]}
+
+    log_time = {'start_time': [pd.Timestamp('2018-11-11 02:33:56.796')],
+                'hour': [2],
+                'day': [11],
+                'week': [45],
+                'month': [11],
+                'year': [2018],
+                'weekday': [False]}
+
+    log_songplays = {'start_time': [pd.Timestamp('2018-11-11 02:33:56.796')],
+                     'userId': ['69'],
+                     'level': ['free'],
+                     'song_id': ['songid123'],
+                     'artist_id': ['artistid123'],
+                     'sessionId': [455],
+                     "location": ["Philadelphia-Camden-Wilmington, PA-NJ-DE-MD"],
+                     "userAgent": ["Mozilla 5.0 (Macintosh; Intel Mac OS X 10_9_4) AppleWebKit 537.3"]}
+                  
+
+    df = pd.DataFrame(log_raw)
+    df_time = pd.DataFrame(log_time)
+    df_users = pd.DataFrame(log_users)
+    df_songplays = pd.DataFrame(log_songplays)
+
+    return df, df_time, df_users, df_songplays
 
 
-class TransformLogDfTestCase(TestCase):
-    pass
+class TransformLogsTestCase(TestCase):
+    def test_make_log_data(self):
+        df, expected, _, _ = make_log_data()
+        self.assertNotEqual(df.iloc[0, :].tolist(), expected.iloc[0, :].tolist())
+    
+    def test_transform_log_df_time(self):
+        df, expected, _, _ = make_log_data()
+        found = transform_log_df_time(df)
+        self.assertEqual(expected.iloc[0, :].tolist(), found.iloc[0, :].tolist())
 
-
-class DfToCsvTestCase(TestCase):
-    def test_df_to_csv(self):
-        csv_string = 'a\t1\nb\t2\nc\t3\n'
-        with io.StringIO(csv_string) as f:
-            df = pd.read_csv(f, sep='\t', header=None)
-        csv = df_to_csv(df)
-        self.assertEqual(csv_string, csv)
-
-    def test_df_to_csv2(self):
-        csv_string = 'a\t1\nb\t2\nc\t3\n'
-        with io.StringIO(csv_string) as f:
-            df = pd.read_csv(f, sep='\t', header=None)
-        csv = df_to_csv2(df)
-        self.assertEqual(csv_string, csv)
+    def test_transform_log_df_user(self):
+        df, _, expected, _ = make_log_data()
+        found = transform_log_df_user(df)
+        self.assertEqual(expected.iloc[0, :].tolist(), found.iloc[0, :].tolist())
 
 
 class CopyFromDfTestCase(TestCase):
@@ -79,7 +124,7 @@ class CopyFromDfTestCase(TestCase):
             with conn.cursor() as cur:
                 cur.execute('CREATE TABLE IF NOT EXISTS copy_test (id int, name text);')
                 try:
-                    copy_from_df(df, cur, 'copy_test')
+                    copy_from_df(df, cur, 'copy_test')  # function to test
                     cur.execute('SELECT * FROM copy_test;')
                     found = cur.fetchall()
                 finally:

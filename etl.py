@@ -23,23 +23,39 @@ def transform_song_df(df):
     return df[artist_cols], df[song_cols]
 
 
-def df_to_csv(df):
+def transform_log_df_time(df):
     """
-    Converts DataFrame df to csv.
-    Returns a string.
+    Takes a DataFrame created from log .json files and returns a
+    DataFrame for loading into the 'time' table.
     """
-    with io.StringIO() as output:
-        df.to_csv(output, sep='\t', header=False, index=False)
-        output.seek(0)
-        result = output.getvalue()
+    t = pd.to_datetime(df.ts, unit='ms')
+    def f(x):
+        weekday = x.weekday() not in [5, 6]
+        return pd.Series([x, x.hour, x.day, x.week, x.month, x.year, weekday])
+    return t.apply(f)
+    
 
-    return result
+    
+def transform_log_df_user(df):
+    """
+    Takes a DataFrame created from log .json files and returns a
+    DataFrame for loading into the 'user' table.
+    """
+    user_cols = ['userId', 'firstName', 'lastName', 'gender', 'level']
+    filt = df['userId'] != ''
+    return df[user_cols][filt]
+    
+def transform_log_df(df):
+    """
+    Takes a DataFrame created from log .json files and returns a
+    DataFrame for loading into the 'songplays' table.
 
+    Note: it is important that the time and user tables are loaded first
+    to satisfy foreign key constraints.
+    """
+    pass
 
-def df_to_csv2(df):
-    "It seems that .to_csv can write directly to a string, making StringIO unnecessary."
-    return df.to_csv(None, sep='\t', header=False, index=False)
-
+    
 
 def copy_from_df(df, cur, table):
     """
@@ -122,27 +138,6 @@ def process_song_file(cur, filepath):
 user_cols = ['userId', 'firstName', 'lastName', 'gender', 'level']
 
 
-def ts_to_time_data(x):
-    """
-    Takes a datetime-like object and returns the parameters for
-    the `time_table_insert` query.
-
-    Parameters
-    ----------
-    x : datetime, numpy.datetime64, or pandas TimeStamp
-        Datetime object to be transformed.
-
-    Returns
-    -------
-    Tuple containing the timestamp x and its components, plus
-    weekday : boolean
-        True if x is a weekday.
-
-    """
-    weekday = x.weekday() not in [5, 6]
-    return (x, x.hour, x.day, x.week, x.month, x.year, weekday)
-
-
 # columns for songplays table
 songplay_cols = ['userId', 'level',
                  'sessionId', 'location', 'userAgent']
@@ -188,7 +183,7 @@ def process_log_file(cur, filepath):
     objects separated by newlines.
     
     Each .json object should contain the following names:
-        
+            
         - `artist`
         - `auth`
         - `firstName`
