@@ -132,5 +132,22 @@ class CopyFromDfTestCase(TestCase):
         self.assertEqual(expected, found)
 
 
+    def test_copy_from_df_with_index(self):
+        df = pd.DataFrame({'num': [34, 31], 'name': ['Phil', 'Bob']})
+        expected = [(1, 34, 'Phil'), (2, 31, 'Bob')]
+
+        with psycopg2.connect('dbname=brendan') as conn:
+            conn.set_session(autocommit=True)
+            with conn.cursor() as cur:
+                cur.execute('CREATE TABLE IF NOT EXISTS copy_test (id serial, num int, name text);')
+                try:
+                    copy_from_df(df, cur, 'copy_test', columns=('num', 'name'))  # function to test
+                    cur.execute('SELECT * FROM copy_test;')
+                    found = cur.fetchall()
+                finally:
+                    cur.execute('DROP TABLE copy_test;')
+        self.assertEqual(expected, found)
+
+
 if __name__ == '__main__':
     main()

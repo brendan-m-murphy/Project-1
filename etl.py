@@ -7,6 +7,23 @@ import sql_queries
 from tqdm import tqdm
 
 
+def extract(filepath):
+    """
+    Retrives all .json files from filepath and yields them as DataFrames.
+    """
+    for root, _, _ in os.walk(filepath):
+        files = glob.glob(os.path.join(root, '*.json'))
+        for f in files:
+            yield pd.read_json(f, lines=True)
+
+
+def batch(filepath, batch_size=1):
+    """
+    TODO: find a way to yield a DF concat from 'batch_size' many DFs
+    """
+    pass
+
+
 def transform_song_df(df):
     """
     Takes a DataFrame created from song .json files and returns
@@ -33,7 +50,6 @@ def transform_log_df_time(df):
         weekday = x.weekday() not in [5, 6]
         return pd.Series([x, x.hour, x.day, x.week, x.month, x.year, weekday])
     return t.apply(f)
-    
 
     
 def transform_log_df_user(df):
@@ -44,7 +60,8 @@ def transform_log_df_user(df):
     user_cols = ['userId', 'firstName', 'lastName', 'gender', 'level']
     filt = df['userId'] != ''
     return df[user_cols][filt]
-    
+
+
 def transform_log_df(df):
     """
     Takes a DataFrame created from log .json files and returns a
@@ -55,9 +72,8 @@ def transform_log_df(df):
     """
     pass
 
-    
 
-def copy_from_df(df, cur, table):
+def copy_from_df(df, cur, table, columns=None):
     """
     Copy DataFrame `df` to PostgreSQL table 'table' via cursor `cur`.
 
@@ -74,9 +90,9 @@ def copy_from_df(df, cur, table):
     to copy to.
     """
     with io.StringIO() as f:
-        df.to_csv(f, sep='\t', header=False, index=False)
+        df.to_csv(f, sep='\t', header=False, index=False, na_rep='')
         f.seek(0)
-        cur.copy_from(f, table)
+        cur.copy_from(f, table, columns=columns, null='')
 
 
 # columns for artist and song queries
@@ -106,7 +122,7 @@ def process_song_file(cur, filepath):
         - `duration`
         - `year`
         
-    Three tables are populated from this data:
+    Two tables are populated from this data:
         1. `songs`
         2. `artists`
 
@@ -136,6 +152,11 @@ def process_song_file(cur, filepath):
 
 # columns for user and songplay queries
 user_cols = ['userId', 'firstName', 'lastName', 'gender', 'level']
+
+
+def ts_to_time_data(x):
+    weekday = x.weekday() not in [5, 6]
+    return (x, x.hour, x.day, x.week, x.month, x.year, weekday)
 
 
 # columns for songplays table
@@ -304,14 +325,24 @@ def process_data(cur, conn, filepath, func):
         conn.commit()
 
 
+def process_data2(cur, conn, filepath):
+    df =pd.concat([df for df in extract(filepath)])
+    artist_df, song_df = transform_song_df(df)
+        
+    copy_from_df(artist_df.drop_duplicates(['artist_id']), cur, 'artists')
+    copy_from_df(song_df, cur, 'songs')
+    conn.commit()
+
+
 def main():
     dsn = "host=127.0.0.1 dbname=sparkifydb user=student password=student"
     conn = psycopg2.connect(dsn)
     cur = conn.cursor()
 
     try:
-        process_data(cur, conn,
-                     filepath='data/song_data', func=process_song_file)
+        # process_data(cur, conn,
+        #              filepath='data/song_data', func=process_song_file)
+        process_data2(cur, conn, filepath='data/song_data')
         process_data(cur, conn,
                      filepath='data/log_data', func=process_log_file)
     finally:
