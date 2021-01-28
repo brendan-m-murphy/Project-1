@@ -17,13 +17,6 @@ def extract(filepath):
             yield pd.read_json(f, lines=True)
 
 
-def batch(filepath, batch_size=1):
-    """
-    TODO: find a way to yield a DF concat from 'batch_size' many DFs
-    """
-    pass
-
-
 def transform_song_df(df):
     """
     Takes a DataFrame created from song .json files and returns
@@ -326,7 +319,7 @@ def process_data(cur, conn, filepath, func):
 
 
 def process_data2(cur, conn, filepath):
-    df =pd.concat([df for df in extract(filepath)])
+    df = pd.concat([df for df in extract(filepath)])
     artist_df, song_df = transform_song_df(df)
         
     copy_from_df(artist_df.drop_duplicates(['artist_id']), cur, 'artists')
