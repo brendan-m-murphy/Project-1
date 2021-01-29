@@ -31,8 +31,8 @@ def transform_log(file):
     filt = df['page'] == 'NextSong'
     df = df[filt]
 
-    cols = ['userId', 'firstName', 'lastName', 'gender',
-            'level', 'sessionId', 'location', 'userAgent']
+    cols = ['song', 'artist', 'userId', 'firstName', 'lastName',
+            'gender', 'level', 'sessionId', 'location', 'userAgent']
 
     t = pd.to_datetime(df.ts, unit='ms')
     def f(x):
@@ -90,6 +90,8 @@ def create_staging_table(name, cur):
         DROP TABLE IF EXISTS log_staging;
         CREATE UNLOGGED TABLE log_staging (
         id SERIAL,
+        song TEXT,
+        artist TEXT,
         userId TEXT,
         firstName TEXT,
         lastName TEXT,
@@ -164,4 +166,71 @@ def etl_song_staging(cur):
     for f in files:
         df = transform_song(f)
         copy_from_df(df, cur, 'song_staging', columns)
+
+
+def etl_log_staging(cur):
+    """
+    Populates log_staging table via the cursor cur.
+
+    Assumes that the filepath 'data/log_data'  points to
+    .json file with .json objects separated by newlines.
+    
+    Each .json object should contain the following names:
+            
+        - `artist`
+        - `auth`
+        - `firstName`
+        - `gender`
+        - `itemInSession`
+        - `lastName`
+        - `level`
+        - `location`
+        - `method`
+        - `page`
+        - `registration`
+        - `sessionId`
+        - `song`
+        - `status`
+        - `ts`
+        - `userAgent`
+        - `userID`
+        
+    Parameters
+    ----------
+    cur : psycopg2 Cursor
+        Cursor for connection to target database.
+
+    Returns
+    -------
+    None.
+
+    """
+    columns = ('song', 'artist', 'userId', 'firstName',
+               'lastName', 'gender', 'level', 'sessionId',
+               'location', 'userAgent', 'ts',
+               'hour', 'day', 'week', 'month',
+               'year', 'weekday')
+        
+    files = extract('data/log_data')
+    for f in files:
+        df = transform_log(f)
+        copy_from_df(df, cur, 'log_staging', columns)
+
+
+
+def set_up(cur, conn):
+    create_staging_table('song_staging', cur)
+    create_staging_table('log_staging', cur)
+    conn.commit()
+
+
+def etl(cur, conn):
+    etl_song_staging(cur)
+    etl_log_staging(cur)
+    conn.commit()
+
+
+def tear_down(cur, conn):
+    drop_staging_table('song_staging', cur)
+    drop_staging_table('log_staging', cur)
 
