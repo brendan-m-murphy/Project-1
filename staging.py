@@ -2,7 +2,9 @@ import io
 import os
 import glob
 import psycopg2
+from psycopg2 import sql
 import pandas as pd
+import sql_queries
 
 
 def extract(filepath):
@@ -15,112 +17,83 @@ def extract(filepath):
             yield f
 
 
-def transform_song(file):
-    df = pd.read_json(file, lines=True)
-    cols = ['artist_id', 'artist_name',
-            'artist_location', 'artist_latitude',
-            'artist_longitude', 'song_id', 'title',
-            'year', 'duration']
-    return df[cols]
 
-
-def transform_log(file):
-    df = pd.read_json(file, lines=True)
-    filt = df['userId'] != ''
-    df = df[filt]
-    filt = df['page'] == 'NextSong'
-    df = df[filt]
-
-    cols = ['song', 'artist', 'userId', 'firstName', 'lastName',
-            'gender', 'level', 'sessionId', 'location', 'userAgent']
-
-    t = pd.to_datetime(df.ts, unit='ms')
-    def f(x):
-        weekday = x.weekday() not in [5, 6]
-        return pd.Series([x, x.hour, x.day, x.week, x.month, x.year, weekday])
-    df_time = t.apply(f)
-    df_time.columns = ['ts', 'hour', 'day', 'week', 'month', 'year', 'weekday']
-
-    return pd.concat([df[cols], df_time], axis=1)
-
-
-def copy_from_df(df, cur, table, columns=None):
+class Stager:
     """
-    Copy DataFrame `df` to PostgreSQL table 'table' via cursor `cur`.
+    A class that writes .json files to a temporary PostgreSQL table.
 
-    The number and type of columns in `df` must match the
-    columns in `table`, unless `columns` is set.
+    The most important attribute of a Stager is its transformer, which
+    must be carefully designed to match the input files to the staging table.
+    
+    The rest of the class encapsulates creating, copying, and dropping
+    the staging table.
 
-    Parameters
+    WARNING: this class is not safe to use with untrusted parameters,
+    due to use of string formatting to create and drop tables.
+
+    It is also possible to over-write a table using the create_table() method.
+    Make sure that table_name does not already exist.
+
+    Attributes
     ----------
-    df: DataFrame
 
-    cur: psycopg2 cursor
+    filepath: string or path-like object
 
-    table: string, name of table in Database connected to cur that we wish
-    to copy to.
+    table_name: string, name of staging table
 
-    columns: tuple, names of columns in table that correspond to the columns of df
+    columns: dict or list, names of columns in staging table, with data types
+    as values, if passed a dictionary.
+
+    transformer: function, takes a filepath to a .json file and returns
+    a CSV string with \t separator and null values as a null string.
+
     """
-    with io.StringIO() as f:
-        df.to_csv(f, sep='\t', header=False, index=False, na_rep='')
-        f.seek(0)
-        cur.copy_from(f, table, columns=columns, null='')
+    def __init__(self, filepath, table_name, columns, transformer):
+        self.filepath = filepath
+        self.table_name = table_name
+        if isinstance(columns, dict):
+            self.columns = columns
+        elif isinstance(columns, list):
+            self.columns = {k: 'TEXT' for k in columns}
+        else:
+            raise ValueError('columns must be a dict or list')
+        self.transformer = transformer
 
+    def get_table_name(self):
+        return self.table_name
 
-def create_staging_table(name, cur):
-    if name == 'song_staging':
-        cur.execute("""
-        DROP TABLE IF EXISTS song_staging;
-        CREATE UNLOGGED TABLE song_staging (
-        id SERIAL,
-        artist_id TEXT,
-        artist_name TEXT,
-        artist_location TEXT,
-        artist_latitude DECIMAL,
-        artist_longitude DECIMAL,
-        song_id TEXT,
-        title TEXT,
-        year INTEGER,
-        duration DECIMAL
-        );
-        """)
-    elif name == 'log_staging':
-        cur.execute("""
-        DROP TABLE IF EXISTS log_staging;
-        CREATE UNLOGGED TABLE log_staging (
-        id SERIAL,
-        song TEXT,
-        artist TEXT,
-        userId TEXT,
-        firstName TEXT,
-        lastName TEXT,
-        gender TEXT,
-        level TEXT,
-        sessionId TEXT,
-        location TEXT,
-        userAgent TEXT,
-        ts TIMESTAMP,
-        hour INT,
-        day INT,
-        week INT,
-        month INT,
-        year INT,
-        weekday BOOLEAN
-        );
-        """)
-        pass
-    else:
-        raise ValueError("'name' must be 'song_staging' or 'log_staging', received:", name)
+    def set_columns(self, cols):
+        self.columns = cols
 
+    def get_columns(self, dtypes=False):
+        """
+        Returns column names as a list.
 
-def drop_staging_table(name, cur):
-    if name == 'song_staging':
-        cur.execute("DROP TABLE song_staging;")
-    elif name == 'log_staging':
-        cur.execute("DROP TABLE log_staging;")
-    else:
-        raise ValueError("'name' must be 'song_staging' or 'log_staging', received:", name)
+        If dtypes=True, returns column names and
+        their data types as a dict.
+        """
+        if dtypes:
+            return self.columns
+        else:
+            return self.columns.keys()
+
+    def copy(self, cur):
+        with io.StringIO() as f:
+            for file in extract(self.filepath):
+                f.write(self.transformer(file))
+            f.seek(0)
+            cur.copy_from(f, self.table_name, columns=tuple(self.get_columns()), null='')
+
+    def create_table(self, cur):
+        cols_str = ', '.join([k + ' ' + v for k, v in self.columns.items()])
+        query = 'CREATE UNLOGGED TABLE {} (id SERIAL, {});'.format(self.table_name, cols_str)
+        cur.execute(query)
+
+    def drop_table(self, cur):
+        query = 'DROP TABLE {};'.format(self.table_name)
+        cur.execute(query)
+
+    
 
 
 def etl_song_staging(cur):
@@ -135,37 +108,30 @@ def etl_song_staging(cur):
     
     Each .json object should contain the following names:
         
-        - `num_songs`
-        - `artist_id`
-        - `artist_latitude`
-        - `artist_longitude`
-        - `artist_location`
-        - `artist_name`
-        - `song_id`
-        - `title`
-        - `duration`
-        - `year`
-        
-    
-    Parameters
-    ----------
-    cur : psycopg2 Cursor
-        Cursor for connection to target database.
-
-    Returns
-    -------
-    None.
+    'num_songs', 'artist_id', 'artist_latitude',
+    'artist_longitude', 'artist_location', 'artist_name'
+    'song_id', 'title', 'duration', 'year'
 
     """
-    columns = ('artist_id', 'artist_name', 'artist_location',
-               'artist_latitude', 'artist_longitude', 'song_id',
-               'title', 'year', 'duration')
+    cols = ['artist_id', 'artist_name', 'artist_location',
+            'artist_latitude', 'artist_longitude', 'song_id',
+            'title', 'year', 'duration']
 
+    def transform_song(file):
+        df = pd.read_json(file, lines=True)
+        return df[cols].to_csv(sep='\t', header=False, index=False, na_rep='')
 
-    files = extract('data/song_data')
-    for f in files:
-        df = transform_song(f)
-        copy_from_df(df, cur, 'song_staging', columns)
+    song_stager = Stager('data/song_data', 'song_staging', cols, transform_song)
+    song_stager.copy(cur)
+
+    # files = extract('data/song_data')
+    # with io.StringIO() as csv:
+    #     for f in files:
+    #         df = transform_song(f)
+    #         df.to_csv(csv, sep='\t', header=False, index=False, na_rep='')
+    #     csv.seek(0)
+    #     cur.copy_from(csv, 'song_staging', columns=tuple(cols), null='')
+
 
 
 def etl_log_staging(cur):
@@ -177,50 +143,64 @@ def etl_log_staging(cur):
     
     Each .json object should contain the following names:
             
-        - `artist`
-        - `auth`
-        - `firstName`
-        - `gender`
-        - `itemInSession`
-        - `lastName`
-        - `level`
-        - `location`
-        - `method`
-        - `page`
-        - `registration`
-        - `sessionId`
-        - `song`
-        - `status`
-        - `ts`
-        - `userAgent`
-        - `userID`
-        
-    Parameters
-    ----------
-    cur : psycopg2 Cursor
-        Cursor for connection to target database.
-
-    Returns
-    -------
-    None.
-
+    'artist', 'auth', 'firstName', 'gender',
+    'itemInSession', 'lastName', 'level',
+    'location', 'method', 'page', 'registration',
+    'sessionId', 'song', 'status', 'ts', 'userAgent', 'userID'
+  
     """
-    columns = ('song', 'artist', 'userId', 'firstName',
-               'lastName', 'gender', 'level', 'sessionId',
-               'location', 'userAgent', 'ts',
-               'hour', 'day', 'week', 'month',
-               'year', 'weekday')
-        
-    files = extract('data/log_data')
-    for f in files:
-        df = transform_log(f)
-        copy_from_df(df, cur, 'log_staging', columns)
+    cols = ['song', 'artist', 'userId', 'firstName', 'lastName',
+            'gender', 'level', 'sessionId', 'location', 'userAgent']
+    cols_time = ['ts', 'hour', 'day', 'week', 'month', 'year', 'weekday']
 
+    def transform_time(x):
+        weekday = x.weekday() not in [5, 6]
+        return pd.Series([x, x.hour, x.day, x.week, x.month, x.year, weekday])
+    
+    def transform_log(file):
+        df = pd.read_json(file, lines=True)
+        filt = df['userId'] != ''
+        df = df[filt]
+        filt = df['page'] == 'NextSong'
+        df = df[filt]
+
+        t = pd.to_datetime(df.ts, unit='ms')
+        df_time = t.apply(transform_time)
+        df_time.columns = cols_time
+
+        return pd.concat([df[cols], df_time], axis=1)
+
+    files = extract('data/log_data')
+    with io.StringIO() as csv:
+        for f in files:
+            df = transform_log(f)
+            df.to_csv(csv, sep='\t', header=False, index=False, na_rep='')
+        csv.seek(0)
+        cur.copy_from(csv, 'log_staging', columns=tuple(cols + cols_time), null='')
+
+
+class StringIteratorIO(io.TextIOBase):
+    """
+    File-like object.
+    Needs to implement read() and readline().
+    """
+    pass
 
 
 def set_up(cur, conn):
-    create_staging_table('song_staging', cur)
-    create_staging_table('log_staging', cur)
+#    cur.execute(sql_queries.create_song_staging)
+    song_cols = {'artist_id': 'TEXT',
+                 'artist_name': 'TEXT',
+                 'artist_location': 'TEXT',
+                 'artist_latitude': 'DECIMAL',
+                 'artist_longitude': 'DECIMAL',
+                 'song_id': 'TEXT',
+                 'title': 'TEXT',
+                 'year': 'INTEGER',
+                 'duration': 'DECIMAL'}
+    song_stager = Stager('data/song_data', 'song_staging', song_cols, lambda: None)
+    song_stager.create_table(cur, conn)
+    cur.execute(sql_queries.create_log_staging)
     conn.commit()
 
 
@@ -231,6 +211,6 @@ def etl(cur, conn):
 
 
 def tear_down(cur, conn):
-    drop_staging_table('song_staging', cur)
-    drop_staging_table('log_staging', cur)
+    cur.execute("DROP TABLE song_staging;")
+    cur.execute("DROP TABLE log_staging;")
 

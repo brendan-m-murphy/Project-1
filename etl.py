@@ -4,53 +4,70 @@ import glob
 import psycopg2
 import pandas as pd
 import sql_queries
-import staging
-from tqdm import tqdm
+from staging import Stager
+
+song_cols = {'artist_id': 'TEXT',
+             'artist_name': 'TEXT',
+             'artist_location': 'TEXT',
+             'artist_latitude': 'DECIMAL',
+             'artist_longitude': 'DECIMAL',
+             'song_id': 'TEXT',
+             'title': 'TEXT',
+             'year': 'INTEGER',
+             'duration': 'DECIMAL'}
 
 
-def process_log_data(cur, conn):
-    cur.execute("""
-    INSERT INTO users (user_id, first_name, last_name, gender, level)
-    SELECT CAST(lstg.userId AS INT), lstg.firstName, lstg.lastName, lstg.gender, lstg.level
-    FROM log_staging as lstg
-    ON CONFLICT DO NOTHING;
-    """)
-    cur.execute("""
-    INSERT INTO time (start_time, hour, day, week, month, year, weekday)
-    SELECT lstg.ts, lstg.hour, lstg.day, lstg.week, lstg.month, lstg.year, lstg.weekday
-    FROM log_staging as lstg
-    ON CONFLICT DO NOTHING;
-    """)
-    cur.execute("""
-    INSERT INTO songplays (start_time, user_id, level, song_id, artist_id, session_id, location, user_agent)
-    SELECT l.ts, CAST(l.userId AS INT), l.level, s.song_id, s.artist_id, CAST(l.sessionId AS INTEGER), l.location, l.userAgent
-    FROM log_staging as l
-    LEFT OUTER JOIN song_staging as s
-    ON l.song = s.title AND l.artist = s.artist_name
-    ON CONFLICT DO NOTHING;
-    """)
-    conn.commit()
-    
+def transform_song(file):
+    df = pd.read_json(file, lines=True)
+    cols = song_cols.keys()
+    return df[cols].to_csv(sep='\t', header=False, index=False, na_rep='')
 
 
-def process_song_data(cur, conn):
-    cur.execute("""
-    INSERT INTO artists (artist_id, name, location, latitude, longitude)
-    SELECT sstg.artist_id, sstg.artist_name, sstg.artist_location, sstg.artist_latitude, sstg.artist_longitude
-    FROM song_staging as sstg
-    ON CONFLICT DO NOTHING;
-    """)
-    cur.execute("""
-    INSERT INTO songs (song_id, title, artist_id, year, duration)
-    SELECT sstg.song_id, sstg.title, sstg.artist_id, sstg.year, sstg.duration
-    FROM song_staging as sstg
-    ON CONFLICT DO NOTHING;
-    """)
-    conn.commit()
+song_stager = Stager('data/song_data', 'song_staging', song_cols, transform_song)
 
 
-def create_fk_idx():
-    pass
+log_cols = {'song': 'TEXT',
+            'artist': 'TEXT',
+            'userId': 'INTEGER',
+            'firstName': 'TEXT',
+            'lastName': 'TEXT',
+            'gender': 'TEXT',
+            'level': 'TEXT',
+            'sessionId': 'TEXT',
+            'location': 'TEXT',
+            'userAgent': 'TEXT',
+            'ts': 'TIMESTAMP',
+            'hour': 'INT',
+            'day': 'INT',
+            'week': 'INT',
+            'month': 'INT',
+            'year': 'INT',
+            'weekday': 'BOOLEAN'}
+
+
+def transform_time(x):
+    weekday = x.weekday() not in [5, 6]
+    return pd.Series([x, x.hour, x.day, x.week, x.month, x.year, weekday])
+
+
+def transform_log(file):
+    df = pd.read_json(file, lines=True)
+    filt = df['userId'] != ''
+    df = df[filt]
+    filt = df['page'] == 'NextSong'
+    df = df[filt]
+
+    t = pd.to_datetime(df.ts, unit='ms')
+    df_time = t.apply(transform_time)
+    df_time.columns = ['ts', 'hour', 'day', 'week', 'month', 'year', 'weekday']
+
+    cols = ['song', 'artist', 'userId', 'firstName', 'lastName',
+            'gender', 'level', 'sessionId', 'location', 'userAgent']
+
+    return pd.concat([df[cols], df_time], axis=1).to_csv(sep='\t', header=False, index=False, na_rep='')
+
+
+log_stager = Stager('data/log_data', 'log_staging', log_cols, transform_log)
 
 
 def main():
@@ -58,13 +75,29 @@ def main():
     conn = psycopg2.connect(dsn)
     cur = conn.cursor()
 
-    staging.set_up(cur, conn)
+    stagers = [song_stager, log_stager]
+    
+    for s in stagers:
+        s.create_table(cur)
+        conn.commit()
+        
     try:
-        staging.etl(cur, conn)
-        process_song_data(cur, conn)
-        process_log_data(cur, conn)
+        for s in stagers:
+            s.copy(cur)
+            conn.commit()
+        for query in sql_queries.insert_queries:
+            cur.execute(query)
+            conn.commit()
+        for query in sql_queries.constraint_queries:
+            cur.execute(query)
+            conn.commit()
+
+        cur.execute("SELECT COUNT(*) FROM songplays WHERE artist_id IS NOT NULL;")
+        print(cur.fetchone())
     finally:
-        staging.tear_down(cur, conn)
+        for s in stagers:
+            s.drop_table(cur)
+            conn.commit()
         cur.close()
         conn.close()
 
