@@ -4,88 +4,8 @@ import glob
 import psycopg2
 import pandas as pd
 import sql_queries
+import staging
 from tqdm import tqdm
-
-
-def extract(filepath):
-    """
-    Retrives all .json files from filepath and yields them as DataFrames.
-    """
-    for root, _, _ in os.walk(filepath):
-        files = glob.glob(os.path.join(root, '*.json'))
-        for f in files:
-            yield pd.read_json(f, lines=True)
-
-
-def transform_song_df(df):
-    """
-    Takes a DataFrame created from song .json files and returns
-    DataFrames for loading into artist and song tables.
-
-    Note: it is important that the artist table is loaded first
-    to satisfy foreign key constraints.
-    """
-    artist_cols = ['artist_id', 'artist_name',
-                   'artist_location', 'artist_latitude',
-                   'artist_longitude']
-    song_cols = ['song_id', 'title', 'artist_id', 'year', 'duration']
-
-    return df[artist_cols], df[song_cols]
-
-
-def transform_log_df_time(df):
-    """
-    Takes a DataFrame created from log .json files and returns a
-    DataFrame for loading into the 'time' table.
-    """
-    t = pd.to_datetime(df.ts, unit='ms')
-    def f(x):
-        weekday = x.weekday() not in [5, 6]
-        return pd.Series([x, x.hour, x.day, x.week, x.month, x.year, weekday])
-    return t.apply(f)
-
-    
-def transform_log_df_user(df):
-    """
-    Takes a DataFrame created from log .json files and returns a
-    DataFrame for loading into the 'user' table.
-    """
-    user_cols = ['userId', 'firstName', 'lastName', 'gender', 'level']
-    filt = df['userId'] != ''
-    return df[user_cols][filt]
-
-
-def transform_log_df(df):
-    """
-    Takes a DataFrame created from log .json files and returns a
-    DataFrame for loading into the 'songplays' table.
-
-    Note: it is important that the time and user tables are loaded first
-    to satisfy foreign key constraints.
-    """
-    pass
-
-
-def copy_from_df(df, cur, table, columns=None):
-    """
-    Copy DataFrame `df` to PostgreSQL table 'table' via cursor `cur`.
-
-    The number and type of columns in `df` are expected to match the
-    columns in `table`.
-
-    Parameters
-    ----------
-    df: DataFrame
-
-    cur: psycopg2 cursor
-
-    table: string, name of table in Database connected to cur that we wish
-    to copy to.
-    """
-    with io.StringIO() as f:
-        df.to_csv(f, sep='\t', header=False, index=False, na_rep='')
-        f.seek(0)
-        cur.copy_from(f, table, columns=columns, null='')
 
 
 # columns for artist and song queries
@@ -318,13 +238,37 @@ def process_data(cur, conn, filepath, func):
         conn.commit()
 
 
-def process_data2(cur, conn, filepath):
-    df = pd.concat([df for df in extract(filepath)])
-    artist_df, song_df = transform_song_df(df)
-        
-    copy_from_df(artist_df.drop_duplicates(['artist_id']), cur, 'artists')
-    copy_from_df(song_df, cur, 'songs')
-    conn.commit()
+def populate_artist_table(cur):
+    cur.execute("""
+    INSERT INTO artists (artist_id, name, location, latitude, longitude)
+    SELECT sstg.artist_id, sstg.artist_name, sstg.artist_location, sstg.artist_latitude, sstg.artist_longitude
+    FROM song_staging as sstg
+    ON CONFLICT DO NOTHING;
+    """)
+    
+
+def populate_song_table(cur):
+    cur.execute("""
+    INSERT INTO songs (song_id, title, artist_id, year, duration)
+    SELECT sstg.song_id, sstg.title, sstg.artist_id, sstg.year, sstg.duration
+    FROM song_staging as sstg
+    ON CONFLICT DO NOTHING;
+    """)
+
+
+def process_song_data(cur, conn):
+    staging.create_staging_table('song_staging', cur)
+    columns = ('artist_id', 'artist_name', 'artist_location',
+               'artist_latitude', 'artist_longitude', 'song_id',
+               'title', 'year', 'duration')
+
+    try:
+        staging.etl_song_staging(cur)
+        populate_artist_table(cur)
+        populate_song_table(cur)
+        conn.commit()
+    finally:
+        staging.drop_staging_table('song_staging', cur)
 
 
 def main():
@@ -333,12 +277,11 @@ def main():
     cur = conn.cursor()
 
     try:
-        # process_data(cur, conn,
-        #              filepath='data/song_data', func=process_song_file)
-        process_data2(cur, conn, filepath='data/song_data')
+        process_song_data(cur, conn)
         process_data(cur, conn,
                      filepath='data/log_data', func=process_log_file)
     finally:
+        cur.close()
         conn.close()
 
 

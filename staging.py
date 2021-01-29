@@ -120,3 +120,48 @@ def drop_staging_table(name, cur):
     else:
         raise ValueError("'name' must be 'song_staging' or 'log_staging', received:", name)
 
+
+def etl_song_staging(cur):
+    """
+    Populates the song_staging table via cursor cur.
+
+    The song_staging table must be created before running this function.
+    Commit must be run after running this function.
+
+    Assumes that data/song_data contains  .json files with .json
+    objects separated by newlines.
+    
+    Each .json object should contain the following names:
+        
+        - `num_songs`
+        - `artist_id`
+        - `artist_latitude`
+        - `artist_longitude`
+        - `artist_location`
+        - `artist_name`
+        - `song_id`
+        - `title`
+        - `duration`
+        - `year`
+        
+    
+    Parameters
+    ----------
+    cur : psycopg2 Cursor
+        Cursor for connection to target database.
+
+    Returns
+    -------
+    None.
+
+    """
+    columns = ('artist_id', 'artist_name', 'artist_location',
+               'artist_latitude', 'artist_longitude', 'song_id',
+               'title', 'year', 'duration')
+
+
+    files = extract('data/song_data')
+    for f in files:
+        df = transform_song(f)
+        copy_from_df(df, cur, 'song_staging', columns)
+
