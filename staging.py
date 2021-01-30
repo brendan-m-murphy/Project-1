@@ -5,6 +5,7 @@ import psycopg2
 from psycopg2 import sql
 import pandas as pd
 import sql_queries
+from string_iterator import StringIteratorIO
 
 
 def extract(filepath):
@@ -15,14 +16,6 @@ def extract(filepath):
         files = glob.glob(os.path.join(root, '*.json'))
         for f in files:
             yield f
-
-
-class StringIteratorIO(io.TextIOBase):
-    """
-    File-like object.
-    Needs to implement read() and readline().
-    """
-    pass
 
 
 class Stager:
@@ -85,6 +78,11 @@ class Stager:
             return self.columns.keys()
 
     def copy(self, cur):
+        gen = (self.transformer(file) for file in extract(self.filepath))
+        with StringIteratorIO(gen) as f:
+            cur.copy_from(f, self.table_name, columns=tuple(self.get_columns()), null='')
+
+    def copy_old(self, cur):
         with io.StringIO() as f:
             for file in extract(self.filepath):
                 f.write(self.transformer(file))
