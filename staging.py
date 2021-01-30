@@ -17,6 +17,13 @@ def extract(filepath):
             yield f
 
 
+class StringIteratorIO(io.TextIOBase):
+    """
+    File-like object.
+    Needs to implement read() and readline().
+    """
+    pass
+
 
 class Stager:
     """
@@ -56,7 +63,7 @@ class Stager:
         elif isinstance(columns, list):
             self.columns = {k: 'TEXT' for k in columns}
         else:
-            raise ValueError('columns must be a dict or list')
+            raise TypeError('columns must be a dict or list')
         self.transformer = transformer
 
     def get_table_name(self):
@@ -92,125 +99,3 @@ class Stager:
     def drop_table(self, cur):
         query = 'DROP TABLE {};'.format(self.table_name)
         cur.execute(query)
-
-    
-
-
-def etl_song_staging(cur):
-    """
-    Populates the song_staging table via cursor cur.
-
-    The song_staging table must be created before running this function.
-    Commit must be run after running this function.
-
-    Assumes that data/song_data contains  .json files with .json
-    objects separated by newlines.
-    
-    Each .json object should contain the following names:
-        
-    'num_songs', 'artist_id', 'artist_latitude',
-    'artist_longitude', 'artist_location', 'artist_name'
-    'song_id', 'title', 'duration', 'year'
-
-    """
-    cols = ['artist_id', 'artist_name', 'artist_location',
-            'artist_latitude', 'artist_longitude', 'song_id',
-            'title', 'year', 'duration']
-
-    def transform_song(file):
-        df = pd.read_json(file, lines=True)
-        return df[cols].to_csv(sep='\t', header=False, index=False, na_rep='')
-
-    song_stager = Stager('data/song_data', 'song_staging', cols, transform_song)
-    song_stager.copy(cur)
-
-    # files = extract('data/song_data')
-    # with io.StringIO() as csv:
-    #     for f in files:
-    #         df = transform_song(f)
-    #         df.to_csv(csv, sep='\t', header=False, index=False, na_rep='')
-    #     csv.seek(0)
-    #     cur.copy_from(csv, 'song_staging', columns=tuple(cols), null='')
-
-
-
-def etl_log_staging(cur):
-    """
-    Populates log_staging table via the cursor cur.
-
-    Assumes that the filepath 'data/log_data'  points to
-    .json file with .json objects separated by newlines.
-    
-    Each .json object should contain the following names:
-            
-    'artist', 'auth', 'firstName', 'gender',
-    'itemInSession', 'lastName', 'level',
-    'location', 'method', 'page', 'registration',
-    'sessionId', 'song', 'status', 'ts', 'userAgent', 'userID'
-  
-    """
-    cols = ['song', 'artist', 'userId', 'firstName', 'lastName',
-            'gender', 'level', 'sessionId', 'location', 'userAgent']
-    cols_time = ['ts', 'hour', 'day', 'week', 'month', 'year', 'weekday']
-
-    def transform_time(x):
-        weekday = x.weekday() not in [5, 6]
-        return pd.Series([x, x.hour, x.day, x.week, x.month, x.year, weekday])
-    
-    def transform_log(file):
-        df = pd.read_json(file, lines=True)
-        filt = df['userId'] != ''
-        df = df[filt]
-        filt = df['page'] == 'NextSong'
-        df = df[filt]
-
-        t = pd.to_datetime(df.ts, unit='ms')
-        df_time = t.apply(transform_time)
-        df_time.columns = cols_time
-
-        return pd.concat([df[cols], df_time], axis=1)
-
-    files = extract('data/log_data')
-    with io.StringIO() as csv:
-        for f in files:
-            df = transform_log(f)
-            df.to_csv(csv, sep='\t', header=False, index=False, na_rep='')
-        csv.seek(0)
-        cur.copy_from(csv, 'log_staging', columns=tuple(cols + cols_time), null='')
-
-
-class StringIteratorIO(io.TextIOBase):
-    """
-    File-like object.
-    Needs to implement read() and readline().
-    """
-    pass
-
-
-def set_up(cur, conn):
-#    cur.execute(sql_queries.create_song_staging)
-    song_cols = {'artist_id': 'TEXT',
-                 'artist_name': 'TEXT',
-                 'artist_location': 'TEXT',
-                 'artist_latitude': 'DECIMAL',
-                 'artist_longitude': 'DECIMAL',
-                 'song_id': 'TEXT',
-                 'title': 'TEXT',
-                 'year': 'INTEGER',
-                 'duration': 'DECIMAL'}
-    song_stager = Stager('data/song_data', 'song_staging', song_cols, lambda: None)
-    song_stager.create_table(cur, conn)
-    cur.execute(sql_queries.create_log_staging)
-    conn.commit()
-
-
-def etl(cur, conn):
-    etl_song_staging(cur)
-    etl_log_staging(cur)
-    conn.commit()
-
-
-def tear_down(cur, conn):
-    cur.execute("DROP TABLE song_staging;")
-    cur.execute("DROP TABLE log_staging;")
-

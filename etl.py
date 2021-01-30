@@ -78,17 +78,25 @@ def main():
     stagers = [song_stager, log_stager]
     
     for s in stagers:
+        print('* Creating table', s.get_table_name())
         s.create_table(cur)
         conn.commit()
         
     try:
         for s in stagers:
+            print('* Copying to table', s.get_table_name())
             s.copy(cur)
             conn.commit()
         for query in sql_queries.insert_queries:
+            print('* Inserting into table', query.lstrip()[len('INSERT INTO '):].partition(' ')[0])
             cur.execute(query)
             conn.commit()
-        for query in sql_queries.constraint_queries:
+        for query in sql_queries.fk_queries:
+            print('* Adding foreign key to table', query.lstrip()[len('ALTER SONGS '):].partition('\n')[0])
+            cur.execute(query)
+            conn.commit()
+        for query in sql_queries.idx_queries:
+            print('* Adding index to table', query.lstrip()[len('CREATE INDEX IF NOT EXISTS '):].partition(' ')[0])
             cur.execute(query)
             conn.commit()
 
@@ -96,6 +104,7 @@ def main():
         print(cur.fetchone())
     finally:
         for s in stagers:
+            print('* Dropping table', s.get_table_name())
             s.drop_table(cur)
             conn.commit()
         cur.close()

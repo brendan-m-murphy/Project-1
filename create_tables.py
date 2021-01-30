@@ -1,6 +1,5 @@
 import psycopg2
 from sql_queries import create_table_queries, drop_table_queries
-from sql_queries import constraint_queries
 
 
 def create_database():
@@ -49,18 +48,6 @@ def create_tables(cur, conn):
         conn.commit()
 
 
-def set_constraints(cur, conn):
-    """
-    Creates foreign key constraints and sets indices
-    """
-    for query in constraint_queries:
-        try:
-            cur.execute(query)
-        except psycopg2.Error as e:
-            print("Error adding constraints:", e)
-        conn.commit()
-
-
 def main():
     """
     - Drops (if exists) and Creates the sparkify database. 
@@ -78,7 +65,6 @@ def main():
     
     drop_tables(cur, conn)
     create_tables(cur, conn)
-#    set_constraints(cur, conn)
 
     conn.close()
 
