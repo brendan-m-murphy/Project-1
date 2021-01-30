@@ -77,17 +77,19 @@ class Stager:
         else:
             return self.columns.keys()
 
-    def copy(self, cur):
-        gen = (self.transformer(file) for file in extract(self.filepath))
-        with StringIteratorIO(gen) as f:
-            cur.copy_from(f, self.table_name, columns=tuple(self.get_columns()), null='')
+    def copy(self, cur, stream=True):
+        if stream:
+            gen = (self.transformer(file) for file in extract(self.filepath))
+            with StringIteratorIO(gen) as f:
+                cur.copy_from(f, self.table_name, columns=tuple(self.get_columns()), null='')
+        else:
+            with io.StringIO() as f:
+                for file in extract(self.filepath):
+                    f.write(file)
+                f.seek(0)
+                cur.copy_from(f, self.table_name, columns=tuple(self.get_columns()), null='')
 
-    def copy_old(self, cur):
-        with io.StringIO() as f:
-            for file in extract(self.filepath):
-                f.write(self.transformer(file))
-            f.seek(0)
-            cur.copy_from(f, self.table_name, columns=tuple(self.get_columns()), null='')
+    
 
     def create_table(self, cur):
         cols_str = ', '.join([k + ' ' + v for k, v in self.columns.items()])

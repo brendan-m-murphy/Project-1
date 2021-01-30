@@ -1,8 +1,13 @@
+from cProfile import Profile
+import csv
 import io
+import json
 import os
 import glob
-import psycopg2
 import pandas as pd
+from pstats import Stats
+import psycopg2
+import create_tables
 import sql_queries
 from staging import Stager
 
@@ -17,10 +22,16 @@ song_cols = {'artist_id': 'TEXT',
              'duration': 'DECIMAL'}
 
 
-def transform_song(file):
+def transform_song_old(file):
     df = pd.read_json(file, lines=True)
     cols = song_cols.keys()
     return df[cols].to_csv(sep='\t', header=False, index=False, na_rep='')
+
+
+def transform_song(file):
+    f = json.load(open(file))
+    return '\t'.join([str(v) if (v := f[k]) else '' for k in song_cols.keys()]) + '\n'
+    
 
 
 song_stager = Stager('data/song_data', 'song_staging', song_cols, transform_song)
@@ -71,6 +82,9 @@ log_stager = Stager('data/log_data', 'log_staging', log_cols, transform_log)
 
 
 def main():
+
+    create_tables.main()
+    
     dsn = "host=127.0.0.1 dbname=sparkifydb user=student password=student"
     conn = psycopg2.connect(dsn)
     cur = conn.cursor()
@@ -83,10 +97,15 @@ def main():
         conn.commit()
         
     try:
-        for s in stagers:
-            print('* Copying to table', s.get_table_name())
-            s.copy(cur)
-            conn.commit()
+        # for s in stagers:
+        #     print('* Copying to table', s.get_table_name())
+        #     s.copy(cur)
+        #     conn.commit()
+        song_profiler = Profile()
+        song_profiler.runcall(lambda: song_stager.copy(cur))
+        log_profiler = Profile()
+        log_profiler.runcall(lambda: log_stager.copy(cur))
+        
         for query in sql_queries.insert_queries:
             print('* Inserting into table', query.lstrip()[len('INSERT INTO '):].partition(' ')[0])
             cur.execute(query)
@@ -109,7 +128,12 @@ def main():
             conn.commit()
         cur.close()
         conn.close()
-
+        
+    for profiler in [song_profiler, log_profiler]:
+        stats = Stats(profiler)
+        stats.strip_dirs()
+        stats.sort_stats('time')
+        stats.print_stats(.1)
 
 if __name__ == "__main__":
     main()
