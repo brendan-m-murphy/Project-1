@@ -70,4 +70,4 @@ class StringIteratorIO(io.TextIOBase):
 
         If size is specified, at most size characters will be read.
         """
-        print("readline is not implemented :(")
+        raise NotImplementedError

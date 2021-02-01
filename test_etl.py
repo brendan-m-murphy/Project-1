@@ -1,5 +1,5 @@
 from unittest import TestCase, main
-from etl import transform_song
+from etl import transform_song, transform_log_new
 import io
 import pandas as pd
 import psycopg2
@@ -12,6 +12,11 @@ class TransformSong(TestCase):
         print(f)
 
 
+class TransformLog(TestCase):
+    def test_transform_log_new(self):
+        filepath = 'data/log_data/2018/11/2018-11-01-events.json'
+        f = transform_log_new(filepath)
+        print(f)
 
 
 if __name__ == '__main__':

@@ -62,9 +62,6 @@ class Stager:
     def get_table_name(self):
         return self.table_name
 
-    def set_columns(self, cols):
-        self.columns = cols
-
     def get_columns(self, dtypes=False):
         """
         Returns column names as a list.
@@ -85,7 +82,7 @@ class Stager:
         else:
             with io.StringIO() as f:
                 for file in extract(self.filepath):
-                    f.write(file)
+                    f.write(self.transformer(file))
                 f.seek(0)
                 cur.copy_from(f, self.table_name, columns=tuple(self.get_columns()), null='')
 

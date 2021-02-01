@@ -6,11 +6,13 @@ def create_database():
     """
     - Creates and connects to the sparkifydb
     - Returns the connection and cursor to sparkifydb
+
+    Note: dbname is set to brendan, since student doesn't have the required permissions.
     """
     
     # connect to default database
     # dsn = "host=127.0.0.1 dbname=studentdb user=student password=student"
-    #  conn = psycopg2.connect(dsn)
+    # conn = psycopg2.connect(dsn)
     conn = psycopg2.connect("dbname=brendan")
     conn.set_session(autocommit=True)
     cur = conn.cursor()
