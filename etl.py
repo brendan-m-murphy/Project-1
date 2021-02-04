@@ -22,8 +22,12 @@ song_cols = {'artist_id': 'TEXT', 'artist_name': 'TEXT',
              'duration': 'DECIMAL'}
 
 
-def transform_song(file):
-    f = json.load(open(file))
+def transform_song(filepath):
+    """
+    Load a .json object from filepath and return it as
+    a tab separated string ending with a newline.
+    """
+    f = json.load(open(filepath))
     return '\t'.join([str(v) if (v := f[k]) else ''
                       for k in song_cols.keys()]) + '\n'
 
@@ -44,6 +48,10 @@ log_cols = {'song': 'TEXT', 'artist': 'TEXT',
 
 
 def transform_log(filepath):
+    """
+    Load .json objects (separated by newlines) from filepath, transform
+    them, and return them as tab separated strings on separate lines.
+    """
     cols = ['song', 'artist', 'userId', 'firstName', 'lastName',
             'gender', 'level', 'sessionId', 'location', 'userAgent']
 
@@ -75,6 +83,32 @@ log_stager = Stager('data/log_data', 'log_staging', log_cols, transform_log)
 
 
 def main():
+    """
+    Run script creating and loading Postgres database from data directory.
+
+    Steps:
+    1. Run create_tables.py to create Postgress database 'sparkifydb' and
+    star schema with tables: songplays, users, time, artists, songs.
+
+    2. Connect to sparkifydb.
+
+    3. Create staging tables song_staging and log_staging.
+
+    4. Create profilers.
+
+    5. In the body of `try`:
+    - copy data to staging tables using profilers.
+    - insert data into star schema
+    - set foreign keys and indices
+    - execute a simple query to check if at least one entry in
+    `songplays` has a non-null artist_id
+
+    6. In the body of `finally`: drop the staging tables and 
+    close the connection.
+
+    7. Print the profiling statistics, showing the top 10% of
+    operations sorted by time.
+    """
 
     create_tables.main()
     
@@ -89,9 +123,8 @@ def main():
         s.create_table(cur)
         conn.commit()
         
-        song_profiler = Profile()
-        log_profiler = Profile()
-        profilers = [song_profiler, log_profiler]
+
+    profilers = [Profile(), Profile()]
     try:
         for p, s in zip(profilers, stagers):
             print('* Copying to table', s.get_table_name())
@@ -125,7 +158,7 @@ def main():
         stats = Stats(profiler)
         stats.strip_dirs()
         stats.sort_stats('time')
-        stats.print_stats()
+        stats.print_stats(.1)
 
 if __name__ == "__main__":
     main()

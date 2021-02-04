@@ -39,7 +39,6 @@ weekday BOOLEAN);
 
 
 # DROP TABLES
-
 songplay_table_drop = "DROP TABLE IF EXISTS songplays;"
 user_table_drop = "DROP TABLE IF EXISTS users;"
 song_table_drop = "DROP TABLE IF EXISTS songs;"
@@ -48,15 +47,14 @@ time_table_drop = "DROP TABLE IF EXISTS time;"
 
 
 # CREATE TABLES
-
 songplay_table_create = ("""
                          CREATE TABLE IF NOT EXISTS songplays (
                              songplay_id serial PRIMARY KEY,
-                             start_time timestamp,
-                             user_id integer,
+                             start_time timestamp NOT NULL,
+                             user_id integer NOT NULL,
                              level char(4),
-                             song_id char(18),
-                             artist_id char(18),
+                             song_id char(18) NOT NULL,
+                             artist_id char(18) NOT NULL,
                              session_id integer,
                              location varchar,
                              user_agent varchar
@@ -153,28 +151,36 @@ set_idx4 = "CREATE INDEX IF NOT EXISTS idx_artist_id ON songplays (artist_id);"
 set_idx5 = "CREATE INDEX IF NOT EXISTS idx_artist_id ON songs (artist_id);"
 
 
-
 # INSERT RECORDS
-
 songplay_table_insert = """
-INSERT INTO songplays (start_time, user_id, level, song_id, artist_id, session_id, location, user_agent)
-SELECT l.ts, CAST(l.userId AS INT), l.level, s.song_id, s.artist_id, CAST(l.sessionId AS INTEGER), l.location, l.userAgent
+INSERT INTO songplays
+(start_time, user_id, level, song_id,
+  artist_id, session_id, location, user_agent)
+SELECT l.ts, CAST(l.userId AS INT), l.level, s.song_id, s.artist_id,
+  CAST(l.sessionId AS INTEGER), l.location, l.userAgent
 FROM log_staging as l
-LEFT OUTER JOIN song_staging as s
+JOIN song_staging as s
 ON l.song = s.title AND l.artist = s.artist_name
 ON CONFLICT DO NOTHING;
 """
 
 user_table_insert = """
 INSERT INTO users (user_id, first_name, last_name, gender, level)
-SELECT CAST(lstg.userId AS INT), lstg.firstName, lstg.lastName, lstg.gender, lstg.level
-FROM log_staging as lstg
-ON CONFLICT DO NOTHING;
+SELECT a, b, c, d, e FROM
+  (SELECT CAST(userId AS INT) AS a, firstName AS b,
+   lastName AS c, gender AS d, level AS e, 
+   rank() OVER (PARTITION BY userId ORDER BY ts DESC) AS rnk
+   FROM log_staging) as subquery
+WHERE rnk = 1
+ON CONFLICT (user_id)
+DO UPDATE SET (first_name, last_name, gender, level) =
+(EXCLUDED.first_name, EXCLUDED.last_name, EXCLUDED.gender, EXCLUDED.level);
 """
 
 time_table_insert = """
 INSERT INTO time (start_time, hour, day, week, month, year, weekday)
-SELECT lstg.ts, lstg.hour, lstg.day, lstg.week, lstg.month, lstg.year, lstg.weekday
+SELECT lstg.ts, lstg.hour, lstg.day, lstg.week,
+  lstg.month, lstg.year, lstg.weekday
 FROM log_staging as lstg
 ON CONFLICT DO NOTHING;
 """
@@ -188,7 +194,8 @@ ON CONFLICT DO NOTHING;
 
 artist_table_insert = """
 INSERT INTO artists (artist_id, name, location, latitude, longitude)
-SELECT sstg.artist_id, sstg.artist_name, sstg.artist_location, sstg.artist_latitude, sstg.artist_longitude
+SELECT sstg.artist_id, sstg.artist_name, sstg.artist_location,
+  sstg.artist_latitude, sstg.artist_longitude
 FROM song_staging as sstg
 ON CONFLICT DO NOTHING;
 """
@@ -201,6 +208,7 @@ create_table_queries = [songplay_table_create, user_table_create,
 drop_table_queries = [songplay_table_drop, user_table_drop,
                       song_table_drop, artist_table_drop,
                       time_table_drop]
-insert_queries = [artist_table_insert, song_table_insert, user_table_insert, time_table_insert, songplay_table_insert]
+insert_queries = [artist_table_insert, song_table_insert,
+                  user_table_insert, time_table_insert, songplay_table_insert]
 fk_queries = [set_fk1, set_fk2, set_fk3, set_fk4, set_fk5]
 idx_queries = [set_idx1, set_idx2, set_idx3, set_idx4, set_idx5]
